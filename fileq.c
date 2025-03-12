@@ -94,46 +94,44 @@ void execute_task(const char *filepath, const char *filename) {
     close(fd);
 }
 
-// Comparison function for qsort
-int compare_dirent(const void *a, const void *b) {
-    return strcmp((*(struct dirent **)a)->d_name, (*(struct dirent **)b)->d_name);
-}
-
 void resume_existing_tasks(char *task_dir) {
     DIR *dir;
     struct dirent *entry;
-    struct dirent **entries = NULL; // Dynamically allocated array of dirent pointers
-    int num_entries = 0;
+    struct dirent *first_entry = NULL; // Store the first entry
 
-    dir = opendir(task_dir);
-    if (dir == NULL) {
-        perror("opendir");
-        return;
-    }
-
-    // Read directory entries into the dynamic array
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_type == DT_REG) {
-            entries = realloc(entries, (num_entries + 1) * sizeof(struct dirent *));
-            entries[num_entries] = malloc(sizeof(struct dirent));
-            memcpy(entries[num_entries], entry, sizeof(struct dirent));
-            num_entries++;
+    while (1) { // Loop until no more tasks
+        dir = opendir(task_dir);
+        if (dir == NULL) {
+            perror("opendir");
+            return;
         }
-    }
-    closedir(dir);
 
-    // Sort the entries alphabetically
-    if (num_entries > 0) {
-        qsort(entries, num_entries, sizeof(struct dirent *), compare_dirent);
+        first_entry = NULL; // Reset for each iteration
 
-        // Execute tasks in sorted order
-        for (int i = 0; i < num_entries; i++) {
+        while ((entry = readdir(dir)) != NULL) {
+            if (entry->d_type == DT_REG) {
+                if (first_entry == NULL) {
+                    first_entry = malloc(sizeof(struct dirent));
+                    memcpy(first_entry, entry, sizeof(struct dirent));
+                } else if (strcmp(entry->d_name, first_entry->d_name) < 0) {
+                    // Found a filename that comes alphabetically before the current first_entry
+                    free(first_entry);
+                    first_entry = malloc(sizeof(struct dirent));
+                    memcpy(first_entry, entry, sizeof(struct dirent));
+                }
+            }
+        }
+        closedir(dir);
+
+        if (first_entry != NULL) {
             char filepath[PATH_MAX];
-            snprintf(filepath, sizeof(filepath), "%s/%s", task_dir, entries[i]->d_name);
-            execute_task(filepath, entries[i]->d_name);
-            free(entries[i]); // Free allocated memory
+            snprintf(filepath, sizeof(filepath), "%s/%s", task_dir, first_entry->d_name);
+            execute_task(filepath, first_entry->d_name);
+            free(first_entry);
+        } else {
+            // No more tasks found
+            break;
         }
-        free(entries); // Free the array
     }
 }
 
