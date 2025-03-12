@@ -189,14 +189,8 @@ int main(int argc, char *argv[]) {
             while (i < length) {
                 struct inotify_event *event = (struct inotify_event *)&buffer[i];
                 if (event->len) {
-                    if (event->mask & IN_CREATE) {
-                        if (!(event->mask & IN_ISDIR)) {
-                            char filepath[PATH_MAX];
-                            snprintf(filepath, sizeof(filepath), "%s/%s", task_dir, event->name);
-                            execute_task(filepath, event->name);
-                        }
-                    } else if (event->mask & IN_DELETE) {
-                        // ... (handle delete events if needed) ...
+                    if (event->mask & (IN_CREATE | IN_DELETE)) { // Rescan on create or delete
+                        resume_existing_tasks(task_dir);
                     }
                 }
                 i += EVENT_SIZE + event->len;
