@@ -194,17 +194,22 @@ int main(int argc, char *argv[]) {
     char buffer[EVENT_BUF_LEN];
     int watch_mode = 0;
     char *task_dir = DEFAULT_TASK_DIR;
+    int num_instances = 1; // Default number of instances
 
     // Parse command-line options
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--watch") == 0) {
             watch_mode = 1;
+        } else if (strncmp(argv[i], "-N=", 3) == 0) {
+            num_instances = atoi(argv[i] + 3);
+            if (num_instances <= 0) {
+                fprintf(stderr, "Invalid number of instances. Using default value of 1.\n");
+                num_instances = 1;
+            }
         } else {
             task_dir = argv[i];
         }
     }
-
-    fprintf(stderr, "Running tasks in '%s'...\n", task_dir);
 
     // Create the "complete" directory if it doesn't exist
     struct stat st = {0};
@@ -212,11 +217,40 @@ int main(int argc, char *argv[]) {
         mkdir(COMPLETE_DIR, 0700);
     }
 
-    // Resume existing tasks
-    run_all_tasks(task_dir);
+    // Run multiple instances
+    if (num_instances == 1) {
+        run_all_tasks(task_dir);
+        if (watch_mode) {
+            watch_for_changes(task_dir);
+        }
+        return 0;
+    }
 
-    if (watch_mode) {
-        watch_for_changes(task_dir);
+    // Fork multiple instances
+    fprintf(stderr, "Running tasks in '%s' with %d instance(s)...\n", task_dir, num_instances);
+
+    for (int i = 0; i < num_instances; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child process
+            fprintf(stderr, "Instance %d starting...\n", i + 1);
+            // Resume existing tasks
+            run_all_tasks(task_dir);
+            if (watch_mode) {
+                watch_for_changes(task_dir);
+            }        
+            fprintf(stderr, "Instance %d finished.\n", i + 1);
+            exit(0); // Exit child process after completing tasks
+        } else if (pid < 0) {
+            perror("fork");
+            fprintf(stderr, "Failed to create instance %d.\n", i + 1);
+        }
+    }
+
+    // Parent process waits for all child processes to complete
+    for (int i = 0; i < num_instances; i++) {
+        int status;
+        wait(&status);
     }
 
     return 0;

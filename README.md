@@ -24,10 +24,11 @@ To compile the program, use the following command:
 ## Usage
 
 ```sh
-./fileq [--watch] [task_directory] 
+./fileq [-N=x] [--watch] [task_directory] 
 ```
 ### Options
 
+* `-N=x` (optional): run multiple instances to process tasks concurrently, where x is the number of instances.
 * `task_directory` (optional): Specifies the directory to monitor for task files. If not provided, the default directory "tasks" is used.
 * `--watch` (optional): Enables continuous monitoring of the task directory using inotify. If this option is not provided, the program will process existing tasks and then exit.
 
