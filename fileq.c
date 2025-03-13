@@ -76,12 +76,10 @@ void execute_task(const char *filepath, const char *filename) {
         if (rename(filepath, completed_filepath) != 0) {
             perror("rename");
             fprintf(stderr, "Task '%s' rename failed.\n", filename);
+        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
         } else {
-            if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
-            } else {
-                fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
-            }
+            fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
         }
     } else {
         perror("fork");
@@ -94,7 +92,7 @@ void execute_task(const char *filepath, const char *filename) {
     close(fd);
 }
 
-void resume_existing_tasks(char *task_dir) {
+void run_all_tasks(char *task_dir) {
     DIR *dir;
     struct dirent *entry;
     struct dirent *first_entry = NULL; // Store the first entry
@@ -159,7 +157,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Resume existing tasks
-    resume_existing_tasks(task_dir);
+    run_all_tasks(task_dir);
 
     if (watch_mode) {
         inotify_fd = inotify_init();
@@ -175,8 +173,8 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        // Scan again immediately after inotify_add_watch
-        resume_existing_tasks(task_dir);
+        // Scan again immediately after inotify_add_watch in case there are new tasks we missed
+        run_all_tasks(task_dir);
 
         while (1) {
             int length = read(inotify_fd, buffer, EVENT_BUF_LEN);
@@ -190,7 +188,7 @@ int main(int argc, char *argv[]) {
                 struct inotify_event *event = (struct inotify_event *)&buffer[i];
                 if (event->len) {
                     if (event->mask & (IN_CREATE | IN_DELETE)) { // Rescan on create or delete
-                        resume_existing_tasks(task_dir);
+                        run_all_tasks(task_dir);
                     }
                 }
                 i += EVENT_SIZE + event->len;
