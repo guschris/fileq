@@ -1,5 +1,7 @@
 # fileq
-This is a simple file-based task queue implemented in C. It monitors a directory for task files, executes the commands specified in those files, and moves the completed or failed task files to a designated "complete" directory.  To make task running "robust", use [autorestart](https://github.com/guschris/autorestart) within your tasks.
+This is a simple file-based task queue implemented in C. It monitors a directory for task files, executes the commands specified in those files, and moves the completed or failed task files to a designated "complete" directory.  
+
+To make task running "robust", use [autorestart](https://github.com/guschris/autorestart) within your tasks.
 
 ## Features
 
@@ -21,7 +23,7 @@ To compile the program, use the following command:
 ## Usage
 
 ```sh
-./your_program [--watch] [task_directory] 
+./fileq [--watch] [task_directory] 
 ```
 ### Options
 
@@ -31,7 +33,7 @@ To compile the program, use the following command:
 ### Task File Format
 * Each task is represented by a regular file in the task directory.
 * The filename is used for alphabetical sorting of the tasks.
-* The content of the file should be a single line containing the command to execute.
+* The content of the file should be a single line containing the command to execute.  To make task running "robust", use [autorestart](https://github.com/guschris/autorestart) within your tasks.
 
 ### Output
 The program outputs log messages to standard error (stderr). These messages indicate when tasks start, complete, or fail, along with the elapsed time for each task.
