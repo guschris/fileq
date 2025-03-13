@@ -1,5 +1,5 @@
 # fileq
-This is a simple file-based task queue implemented in C. It monitors a directory for task files, executes the commands specified in those files, and moves the completed or failed task files to a designated "complete" directory.
+This is a simple file-based task queue implemented in C. It monitors a directory for task files, executes the commands specified in those files, and moves the completed or failed task files to a designated "complete" directory.  To make task running "robust", use [autorestart](https://github.com/guschris/autorestart) within your tasks.
 
 ## Features
 
