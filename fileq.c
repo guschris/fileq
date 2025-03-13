@@ -74,18 +74,13 @@ void execute_task(const char *filepath, const char *filename, int fd) {
         char completed_filepath[PATH_MAX];
         snprintf(completed_filepath, sizeof(completed_filepath), "%s/%s", COMPLETE_DIR, filename);
 
-        // Check if the file still exists before renaming
-        if (access(filepath, F_OK) == 0) {
-            if (rename(filepath, completed_filepath) != 0) {
-                perror("rename");
-                fprintf(stderr, "Task '%s' rename from %s to %s failed.\n", filename, filepath, completed_filepath);
-            } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-                fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
-            } else {
-                fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
-            }
+        if (rename(filepath, completed_filepath) != 0) {
+            perror("rename");
+            fprintf(stderr, "Task '%s' rename from %s to %s failed.\n", filename, filepath, completed_filepath);
+        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
         } else {
-            fprintf(stderr, "Task '%s' was deleted before completion.\n", filename);
+            fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
         }
     } else {
         perror("fork");
