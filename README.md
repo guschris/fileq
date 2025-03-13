@@ -29,8 +29,8 @@ To compile the program, use the following command:
 ### Options
 
 * `-N=x` (optional): run multiple instances to process tasks concurrently, where x is the number of instances.
-* `task_directory` (optional): Specifies the directory to monitor for task files. If not provided, the default directory "tasks" is used.
 * `--watch` (optional): Enables continuous monitoring of the task directory using inotify. If this option is not provided, the program will process existing tasks and then exit.
+* `task_directory` (optional): Specifies the directory to monitor for task files. If not provided, the default directory "tasks" is used.
 
 ### Task File Format
 * Each task is represented by a regular file in the task directory.
