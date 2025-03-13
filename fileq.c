@@ -56,7 +56,6 @@ void execute_task(const char *filepath, const char *filename, int fd) {
         fprintf(stderr, "Task '%s' failed to read command.\n", filename);
         return;
     }
-    // fclose(file);
     command[strcspn(command, "\n")] = 0;
 
     pid_t pid = fork();
