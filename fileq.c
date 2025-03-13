@@ -17,7 +17,7 @@
 #define EVENT_SIZE (sizeof(struct inotify_event))
 #define EVENT_BUF_LEN (1024 * (EVENT_SIZE + 16))
 
-void execute_task(const char *filepath, const char *filename) {
+void execute_task(const char *filepath, const char *filename, int fd) {
     time_t start_time, end_time;
     double elapsed_time;
     int status;
@@ -25,36 +25,38 @@ void execute_task(const char *filepath, const char *filename) {
     fprintf(stderr, "Task '%s' starting...\n", filename);
     start_time = time(NULL);
 
-    int fd = open(filepath, O_RDWR);
-    if (fd == -1) {
-        perror("open");
-        fprintf(stderr, "Task '%s' failed to open.\n", filename);
-        return;
-    }
-    struct flock fl = {F_WRLCK, SEEK_SET, 0, 0, 0};
-    if (fcntl(fd, F_SETLK, &fl) == -1) {
-        perror("fcntl");
-        close(fd);
-        fprintf(stderr, "Task '%s' failed to lock.\n", filename);
-        return;
-    }
-
-    FILE *file = fopen(filepath, "r");
+    FILE *file = fdopen(fd, "r");
     if (file == NULL) {
-        perror("fopen");
-        close(fd);
+        perror("fdopen");
         fprintf(stderr, "Task '%s' failed to open file.\n", filename);
         return;
     }
 
-    char command[1024];
-    if (fgets(command, sizeof(command), file) == NULL) {
-        fclose(file);
-        close(fd);
+    // Determine the size of the command
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    // do NOT close the file here, it will be closed by the caller
+
+    if (file_size <= 0) {
+        fprintf(stderr, "Task '%s' failed to determine command size.\n", filename);
+        return;
+    }
+
+    char *command = malloc(file_size + 1);
+    if (command == NULL) {
+        perror("malloc");
+        fprintf(stderr, "Task '%s' failed to allocate memory for command.\n", filename);
+        return;
+    }
+
+    if (fgets(command, file_size + 1, file) == NULL) {
+        free(command);
         fprintf(stderr, "Task '%s' failed to read command.\n", filename);
         return;
     }
-    fclose(file);
+    // fclose(file);
     command[strcspn(command, "\n")] = 0;
 
     pid_t pid = fork();
@@ -73,64 +75,118 @@ void execute_task(const char *filepath, const char *filename) {
         char completed_filepath[PATH_MAX];
         snprintf(completed_filepath, sizeof(completed_filepath), "%s/%s", COMPLETE_DIR, filename);
 
-        if (rename(filepath, completed_filepath) != 0) {
-            perror("rename");
-            fprintf(stderr, "Task '%s' rename failed.\n", filename);
-        } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-            fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
+        // Check if the file still exists before renaming
+        if (access(filepath, F_OK) == 0) {
+            if (rename(filepath, completed_filepath) != 0) {
+                perror("rename");
+                fprintf(stderr, "Task '%s' rename from %s to %s failed.\n", filename, filepath, completed_filepath);
+            } else if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+                fprintf(stderr, "Task '%s' completed in %.2f seconds. moved task to %s\n", filename, elapsed_time, completed_filepath);
+            } else {
+                fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
+            }
         } else {
-            fprintf(stderr, "Task '%s' failed (exit code %d) in %.2f seconds.\n", filename, WEXITSTATUS(status), elapsed_time);
+            fprintf(stderr, "Task '%s' was deleted before completion.\n", filename);
         }
     } else {
         perror("fork");
         fprintf(stderr, "Task '%s' fork failed.\n", filename);
-        // Move the task file if fork fails
-        char completed_filepath[PATH_MAX];
-        snprintf(completed_filepath, sizeof(completed_filepath), "%s/%s", COMPLETE_DIR, filename);
-        rename(filepath, completed_filepath);
     }
-    close(fd);
+    free(command);
+}
+
+int run_next_task(char *task_dir) {
+    DIR *dir;
+    struct dirent *entry;
+    struct dirent **namelist;
+    int n;
+
+    n = scandir(task_dir, &namelist, NULL, alphasort);
+    if (n < 0) {
+        perror("scandir");
+        return 0;
+    }
+
+    for (int i = 0; i < n; i++) {
+        entry = namelist[i];
+        if (entry->d_type == DT_REG) {
+            char filepath[PATH_MAX];
+            snprintf(filepath, sizeof(filepath), "%s/%s", task_dir, entry->d_name);
+
+            // lock the file without waiting
+            int fd = open(filepath, O_RDWR);
+            if (fd == -1) {
+                // don't print error, another process may have already processed the file
+                free(entry);
+                continue;
+            }
+            struct flock fl = {F_WRLCK, SEEK_SET, 0, 0, 0};
+            if (fcntl(fd, F_SETLK, &fl) == -1) {
+                // don't print error, another process may have the file locked already
+                close(fd);
+                free(entry);
+                continue;
+            }
+
+            execute_task(filepath, entry->d_name, fd);
+            close(fd);
+            free(entry);
+            free(namelist);
+            return 1;
+        }
+        free(entry);
+    }
+    free(namelist);
+    return 0;
 }
 
 void run_all_tasks(char *task_dir) {
-    DIR *dir;
-    struct dirent *entry;
-    struct dirent *first_entry = NULL; // Store the first entry
+    while (run_next_task(task_dir)) {
+        // Loop until no more tasks
+    }
+}
 
-    while (1) { // Loop until no more tasks
-        dir = opendir(task_dir);
-        if (dir == NULL) {
-            perror("opendir");
-            return;
-        }
+void watch_for_changes(char *task_dir) {
+    int inotify_fd = -1, watch_fd = -1;
+    char buffer[EVENT_BUF_LEN];
 
-        first_entry = NULL; // Reset for each iteration
+    inotify_fd = inotify_init();
+    if (inotify_fd < 0) {
+        perror("inotify_init");
+        return;
+    }
 
-        while ((entry = readdir(dir)) != NULL) {
-            if (entry->d_type == DT_REG) {
-                if (first_entry == NULL) {
-                    first_entry = malloc(sizeof(struct dirent));
-                    memcpy(first_entry, entry, sizeof(struct dirent));
-                } else if (strcmp(entry->d_name, first_entry->d_name) < 0) {
-                    // Found a filename that comes alphabetically before the current first_entry
-                    free(first_entry);
-                    first_entry = malloc(sizeof(struct dirent));
-                    memcpy(first_entry, entry, sizeof(struct dirent));
-                }
-            }
-        }
-        closedir(dir);
+    watch_fd = inotify_add_watch(inotify_fd, task_dir, IN_CREATE | IN_DELETE);
+    if (watch_fd < 0) {
+        perror("inotify_add_watch");
+        close(inotify_fd);
+        return;
+    }
 
-        if (first_entry != NULL) {
-            char filepath[PATH_MAX];
-            snprintf(filepath, sizeof(filepath), "%s/%s", task_dir, first_entry->d_name);
-            execute_task(filepath, first_entry->d_name);
-            free(first_entry);
-        } else {
-            // No more tasks found
+    // Scan again immediately after inotify_add_watch in case there are new tasks we missed
+    run_all_tasks(task_dir);
+
+    while (1) {
+        int length = read(inotify_fd, buffer, EVENT_BUF_LEN);
+        if (length < 0) {
+            perror("read");
             break;
         }
+
+        int i = 0;
+        while (i < length) {
+            struct inotify_event *event = (struct inotify_event *)&buffer[i];
+            if (event->len) {
+                if (event->mask & (IN_CREATE | IN_DELETE)) { // Rescan on create or delete
+                    run_all_tasks(task_dir);
+                }
+            }
+            i += EVENT_SIZE + event->len;
+        }
     }
+
+    inotify_rm_watch(inotify_fd, watch_fd);
+    close(inotify_fd);
 }
 
 int main(int argc, char *argv[]) {
@@ -160,43 +216,7 @@ int main(int argc, char *argv[]) {
     run_all_tasks(task_dir);
 
     if (watch_mode) {
-        inotify_fd = inotify_init();
-        if (inotify_fd < 0) {
-            perror("inotify_init");
-            return 1;
-        }
-
-        watch_fd = inotify_add_watch(inotify_fd, task_dir, IN_CREATE | IN_DELETE);
-        if (watch_fd < 0) {
-            perror("inotify_add_watch");
-            close(inotify_fd);
-            return 1;
-        }
-
-        // Scan again immediately after inotify_add_watch in case there are new tasks we missed
-        run_all_tasks(task_dir);
-
-        while (1) {
-            int length = read(inotify_fd, buffer, EVENT_BUF_LEN);
-            if (length < 0) {
-                perror("read");
-                break;
-            }
-
-            int i = 0;
-            while (i < length) {
-                struct inotify_event *event = (struct inotify_event *)&buffer[i];
-                if (event->len) {
-                    if (event->mask & (IN_CREATE | IN_DELETE)) { // Rescan on create or delete
-                        run_all_tasks(task_dir);
-                    }
-                }
-                i += EVENT_SIZE + event->len;
-            }
-        }
-
-        inotify_rm_watch(inotify_fd, watch_fd);
-        close(inotify_fd);
+        watch_for_changes(task_dir);
     }
 
     return 0;
